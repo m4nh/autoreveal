@@ -1,6 +1,15 @@
 <section>
   <h2>Import Code</h2>
   <p>With <b>data-line-number</b> you can highlight progressively lines</p>
+
+  <!-- 
+  data-load-code directive tells AutoReveal to load the specified file as code Reveal.js markup 
+  each data-* attributes to this div are propagated to the code block. See https://revealjs.com/code/
+  for available options.
+
+  Code is loaded from relative path as it is without changing indentation nor line numbers.
+  -->
+
   <div
     data-load-code="./code.py"
     data-noescape

@@ -388,7 +388,7 @@ def watch_files(
 
     This function runs in a separate thread and continuously monitors:
     - The base HTML template
-    - All slide folder index.html files
+    - All files in all slide folders (recursively)
     - The slide folder structure itself
 
     When changes are detected, it rebuilds the presentation and optionally
@@ -405,54 +405,44 @@ def watch_files(
     if not watch:
         return
 
+    def get_all_files_in_slides() -> List[str]:
+        """Get all files in the slides directory recursively."""
+        all_files = [base_html_path]
+        for root, dirs, files in os.walk(slides_dir):
+            for file in files:
+                file_path = os.path.join(root, file)
+                all_files.append(file_path)
+        return all_files
+
     # Initial collection of files to monitor
-    files_to_watch = [base_html_path]
-    subfolders = sorted(
-        [
-            d
-            for d in os.listdir(slides_dir)
-            if os.path.isdir(os.path.join(slides_dir, d))
-        ]
-    )
-    for folder in subfolders:
-        index_path = os.path.join(slides_dir, folder, "index.html")
-        if os.path.exists(index_path):
-            files_to_watch.append(index_path)
+    files_to_watch = get_all_files_in_slides()
+
+    # Initial collection of files to monitor
+    files_to_watch = get_all_files_in_slides()
 
     # Record initial modification times for all watched files
     mtimes: Dict[str, float] = {
         f: os.path.getmtime(f) for f in files_to_watch if os.path.exists(f)
     }
 
+    print(f"Watching {len(files_to_watch)} files in slides directory...")
+
     # Main watch loop
     while True:
         time.sleep(1)
 
-        # Check if the slide folder structure has changed (folders added/removed)
-        current_subfolders = sorted(
-            [
-                d
-                for d in os.listdir(slides_dir)
-                if os.path.isdir(os.path.join(slides_dir, d))
-            ]
-        )
-        if current_subfolders != subfolders:
-            print("Slides folder structure changed, updating watch list...")
-            subfolders = current_subfolders
-
-            # Rebuild the watch list with new folders
-            files_to_watch = [base_html_path]
-            for folder in subfolders:
-                index_path = os.path.join(slides_dir, folder, "index.html")
-                if os.path.exists(index_path):
-                    files_to_watch.append(index_path)
+        # Check if files were added or removed
+        current_files = get_all_files_in_slides()
+        if set(current_files) != set(files_to_watch):
+            print("Files added or removed in slides directory, updating watch list...")
+            files_to_watch = current_files
 
             # Update modification times for the new file list
             mtimes = {
                 f: os.path.getmtime(f) for f in files_to_watch if os.path.exists(f)
             }
 
-            # Rebuild since structure changed
+            # Rebuild since files changed
             build_slides(
                 base_path,
                 slides_dir,
@@ -470,9 +460,10 @@ def watch_files(
             if os.path.exists(f) and os.path.getmtime(f) != mtimes.get(f, 0):
                 changed = True
                 mtimes[f] = os.path.getmtime(f)
+                print(f"Change detected in: {os.path.relpath(f, base_path)}")
 
         if changed:
-            print("File change detected, rebuilding...")
+            print("Rebuilding presentation...")
             build_slides(
                 base_path,
                 slides_dir,
