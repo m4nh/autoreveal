@@ -149,13 +149,19 @@ class ReloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 def process_loads(soup: BeautifulSoup, base_dir: str) -> None:
     """
-    Recursively process all elements with data-load attributes in the HTML.
+    Recursively process all elements with data-load or data-load-code attributes.
 
-    This function finds all elements with a data-load attribute and loads the
-    content from the specified file. The behavior depends on the file type:
+    This function finds all elements with data-load or data-load-code attributes
+    and loads content from the specified file:
+
+    data-load behavior (smart loading):
     - .html files: Parse and include content, adjusting relative paths
     - .mermaid files: Wrap in diagram containers for Mermaid rendering
-    - Code files: Wrap in <pre><code> with appropriate syntax highlighting class
+    - Other files: Wrap in <pre><code> with syntax highlighting
+
+    data-load-code behavior (always show as code):
+    - ALL files (including .html and .mermaid): Wrap in <pre><code> with syntax highlighting
+    - Use this when you want to display the source code of HTML/Mermaid files
 
     The function is called recursively to handle nested data-load attributes.
 
@@ -165,9 +171,11 @@ def process_loads(soup: BeautifulSoup, base_dir: str) -> None:
     """
     changed = False
 
-    # Find all elements with data-load attribute
+    # Find all elements with data-load or data-load-code attribute
     for elem in soup.find_all(attrs={"data-load": True}):
         load_path = elem.get("data-load")
+        is_code_load = False  # This is a regular data-load
+
         if load_path:
             full_path = os.path.join(base_dir, load_path)
             if os.path.exists(full_path):
@@ -177,6 +185,7 @@ def process_loads(soup: BeautifulSoup, base_dir: str) -> None:
 
                 ext = os.path.splitext(load_path)[1].lower()
 
+                # For regular data-load, use smart loading based on file type
                 if ext == ".html":
                     # For HTML files, adjust relative paths to maintain correct references
                     # Replace ./ in src attributes with proper relative path
@@ -189,6 +198,12 @@ def process_loads(soup: BeautifulSoup, base_dir: str) -> None:
                     loaded_content = re.sub(
                         r'data-load="\./([^"]*)"',
                         lambda m: f'data-load="{os.path.dirname(load_path)}/{m.group(1)}"',
+                        loaded_content,
+                    )
+                    # Replace ./ in data-load-code attributes with proper relative path
+                    loaded_content = re.sub(
+                        r'data-load-code="\./([^"]*)"',
+                        lambda m: f'data-load-code="{os.path.dirname(load_path)}/{m.group(1)}"',
                         loaded_content,
                     )
 
@@ -218,25 +233,42 @@ def process_loads(soup: BeautifulSoup, base_dir: str) -> None:
                     changed = True
 
                 else:
-                    # For code files, wrap in appropriate syntax highlighting tags
-                    lang = extension_to_lang.get(ext, ext[1:] if ext else "text")
-                    code_content = f'<pre><code class="language-{lang}">{html.escape(loaded_content)}</code></pre>'
-                    code_soup = BeautifulSoup(code_content, "html.parser")
+                    pass
 
-                    # Propagate data-* attributes from source element to the code element
-                    # This preserves attributes like data-line-numbers, data-trim, etc.
-                    code_elem = code_soup.find("code")
-                    if code_elem:
-                        for attr_name, attr_value in elem.attrs.items():
-                            # Copy all data-* attributes except data-load
-                            if (
-                                attr_name.startswith("data-")
-                                and attr_name != "data-load"
-                            ):
-                                code_elem[attr_name] = attr_value
+    # Process data-load-code attributes (always treat as code)
+    for elem in soup.find_all(attrs={"data-load-code": True}):
+        load_path = elem.get("data-load-code")
 
-                    elem.clear()
-                    elem.extend(code_soup.contents)
+        if load_path:
+            full_path = os.path.join(base_dir, load_path)
+            if os.path.exists(full_path):
+                # Read the content from the external file
+                with open(full_path, "r") as f:
+                    loaded_content = f.read()
+
+                ext = os.path.splitext(load_path)[1].lower()
+
+                # Always treat as code - wrap in appropriate syntax highlighting tags
+                lang = extension_to_lang.get(ext, ext[1:] if ext else "text")
+                code_content = f'<pre><code class="language-{lang}">{html.escape(loaded_content)}</code></pre>'
+                code_soup = BeautifulSoup(code_content, "html.parser")
+
+                # Propagate data-* attributes from source element to the code element
+                # This preserves attributes like data-line-numbers, data-trim, etc.
+                code_elem = code_soup.find("code")
+                if code_elem:
+                    for attr_name, attr_value in elem.attrs.items():
+                        # Copy all data-* attributes except data-load-code
+                        if (
+                            attr_name.startswith("data-")
+                            and attr_name != "data-load-code"
+                        ):
+                            code_elem[attr_name] = attr_value
+
+                elem.clear()
+                elem.extend(code_soup.contents)
+                del elem["data-load-code"]
+                changed = True
 
     # If any changes were made, recursively process again for nested data-load attributes
     if changed:
@@ -257,7 +289,7 @@ def build_slides(
     1. Reads the base HTML template
     2. Discovers all slide folders (sorted alphabetically)
     3. Loads each folder's index.html
-    4. Processes data-load attributes to inline external files
+    4. Processes data-load and data-load-code attributes to inline external files
     5. Adjusts relative paths for resources
     6. Combines all slides into the base template
     7. Optionally injects live reload script
@@ -305,6 +337,11 @@ def build_slides(
             slide_content = re.sub(
                 r'data-load="\./([^"]*)"',
                 rf'data-load="{slides_dir_name}/{folder}/\1"',
+                slide_content,
+            )
+            slide_content = re.sub(
+                r'data-load-code="\./([^"]*)"',
+                rf'data-load-code="{slides_dir_name}/{folder}/\1"',
                 slide_content,
             )
 

@@ -1,0 +1,29 @@
+<section>
+  <h3>data-load vs data-load-code</h3>
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <h5>data-load (smart loading)</h5>
+      <p>HTML is parsed and included:</p>
+      <div data-load="./sample.html"></div>
+    </div>
+    <div>
+      <h5>data-load-code (always as code)</h5>
+      <p>HTML is shown as code:</p>
+      <div data-load-code="./sample.html" data-line-numbers></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h3>Mermaid Example</h3>
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <h5>data-load (renders diagram)</h5>
+      <div data-load="./diagram.mermaid"></div>
+    </div>
+    <div>
+      <h5>data-load-code (shows source)</h5>
+      <div data-load-code="./diagram.mermaid" data-line-numbers></div>
+    </div>
+  </div>
+</section>
