@@ -1,5 +1,5 @@
-export class Gino {
+export class Hello {
   sayHello(): string {
-    return "Hello from Gino!";
+    return "Hello World!";
   }
 }

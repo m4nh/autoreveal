@@ -1,5 +1,5 @@
-import math
+def hello():
+    print("Hello World!")
 
 
-def code(a: int):
-    return math.sqrt(a)
+hello()
