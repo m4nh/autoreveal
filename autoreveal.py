@@ -1,19 +1,29 @@
 #!/usr/bin/env python3
+"""
+AutoReveal - Automatic Reveal.js Slide Builder and Server
+
+This module provides functionality to build and serve Reveal.js presentations
+by automatically processing slide folders, handling external file loading,
+and optionally providing live reload capabilities for development.
+"""
+
 import argparse
 import html
+import http.server
+import json
 import os
 import re
-import http.server
 import socketserver
 import threading
 import time
-import json
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, List, Optional
+
 from bs4 import BeautifulSoup
 
 
-extension_to_lang = {
+# Mapping of file extensions to their corresponding language identifiers
+# Used for syntax highlighting in code blocks
+extension_to_lang: Dict[str, str] = {
     ".py": "python",
     ".js": "javascript",
     ".ts": "typescript",
@@ -36,12 +46,27 @@ extension_to_lang = {
     # Add more as needed
 }
 
-# Simple approach: use polling instead of WebSocket
-reload_flag = threading.Event()
+# Threading event flag for coordinating browser reload signals
+# Uses polling approach instead of WebSocket for simplicity
+reload_flag: threading.Event = threading.Event()
 
 
-def inject_live_reload_script(html_content):
-    """Inject live reload polling script into HTML"""
+def inject_live_reload_script(html_content: str) -> str:
+    """
+    Inject a live reload polling script into the HTML content.
+
+    This function adds a JavaScript snippet that periodically polls the server
+    to check if a reload is needed. When a reload signal is detected, the page
+    automatically refreshes.
+
+    Args:
+        html_content: The HTML content to inject the script into.
+
+    Returns:
+        The modified HTML content with the live reload script injected before
+        the closing </body> tag.
+    """
+    # JavaScript that polls the server every second to check for reload signals
     live_reload_script = """
     <script>
     (function() {
@@ -56,88 +81,134 @@ def inject_live_reload_script(html_content):
                     }
                 })
                 .catch(() => {
-                    // Server might be restarting, try again
+                    // Server might be restarting, silently ignore and retry
                 })
                 .finally(() => {
+                    // Poll again after 1 second
                     setTimeout(checkForReload, 1000);
                 });
         }
         
-        // Start checking after page loads
+        // Start polling after page loads
         setTimeout(checkForReload, 1000);
     })();
     </script>
     """
 
-    # Insert before closing </body> tag
+    # Insert the script before the closing </body> tag
     return html_content.replace("</body>", f"{live_reload_script}</body>")
 
 
-def notify_reload():
-    """Signal that a reload should happen"""
+def notify_reload() -> None:
+    """
+    Signal that a reload should happen in all connected browsers.
+
+    Sets the global reload flag which will be picked up by the next
+    polling request from the browser's live reload script.
+    """
     reload_flag.set()
     print("Reload signal sent")
 
 
 class ReloadHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
+    """
+    Custom HTTP request handler that supports live reload functionality.
+
+    Extends SimpleHTTPRequestHandler to add a special endpoint for checking
+    reload status. When browsers poll the /reload-check endpoint, this handler
+    responds with the current reload status.
+    """
+
+    def do_GET(self) -> None:
+        """
+        Handle GET requests, including the special /reload-check endpoint.
+
+        If the request is for /reload-check, respond with JSON indicating
+        whether a reload should occur. Otherwise, delegate to the parent
+        class's file serving functionality.
+        """
         if self.path.startswith("/reload-check"):
+            # Respond to the reload check with JSON
             self.send_response(200)
             self.send_header("Content-type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
+            # Check if reload flag is set, then clear it
             should_reload = reload_flag.is_set()
             if should_reload:
                 reload_flag.clear()
 
+            # Send JSON response indicating whether reload is needed
             response = json.dumps({"reload": should_reload})
             self.wfile.write(response.encode())
         else:
+            # Delegate to parent class for normal file serving
             super().do_GET()
 
 
-def process_loads(soup, base_dir):
+def process_loads(soup: BeautifulSoup, base_dir: str) -> None:
+    """
+    Recursively process all elements with data-load attributes in the HTML.
+
+    This function finds all elements with a data-load attribute and loads the
+    content from the specified file. The behavior depends on the file type:
+    - .html files: Parse and include content, adjusting relative paths
+    - .mermaid files: Wrap in diagram containers for Mermaid rendering
+    - Code files: Wrap in <pre><code> with appropriate syntax highlighting class
+
+    The function is called recursively to handle nested data-load attributes.
+
+    Args:
+        soup: BeautifulSoup object containing the parsed HTML to process.
+        base_dir: Base directory path for resolving relative file paths.
+    """
     changed = False
+
+    # Find all elements with data-load attribute
     for elem in soup.find_all(attrs={"data-load": True}):
         load_path = elem.get("data-load")
         if load_path:
             full_path = os.path.join(base_dir, load_path)
             if os.path.exists(full_path):
+                # Read the content from the external file
                 with open(full_path, "r") as f:
                     loaded_content = f.read()
 
                 ext = os.path.splitext(load_path)[1].lower()
 
                 if ext == ".html":
-                    # Replace ./ in loaded_content
+                    # For HTML files, adjust relative paths to maintain correct references
+                    # Replace ./ in src attributes with proper relative path
                     loaded_content = re.sub(
                         r'src="\./([^"]*)"',
                         lambda m: f'src="{os.path.dirname(load_path)}/{m.group(1)}"',
                         loaded_content,
                     )
+                    # Replace ./ in data-load attributes with proper relative path
                     loaded_content = re.sub(
                         r'data-load="\./([^"]*)"',
                         lambda m: f'data-load="{os.path.dirname(load_path)}/{m.group(1)}"',
                         loaded_content,
                     )
 
-                    # Parse loaded
+                    # Parse the loaded HTML content
                     loaded_soup = BeautifulSoup(loaded_content, "html.parser")
 
-                    # Replace elem contents
+                    # Replace the element's contents with loaded content
                     elem.clear()
                     if loaded_soup.body:
+                        # If there's a body tag, use only its contents
                         elem.extend(loaded_soup.body.contents)
                     else:
+                        # Otherwise use all contents
                         elem.extend(loaded_soup.contents)
                     del elem["data-load"]
                     changed = True
+
                 elif ext == ".mermaid":
-                    # Special handling for mermaid diagrams
-                    # Create structure:
-                    # <span class="diagram-data" style="display: none">CONTENT</span>
-                    # <div class="diagram-display"></div>
+                    # For Mermaid diagrams, create special container structure
+                    # Hidden span contains the diagram source, div is the render target
                     diagram_html = f"""<span class="diagram-data" style="display: none">{loaded_content}</span><div class="diagram-display"></div>"""
                     diagram_soup = BeautifulSoup(diagram_html, "html.parser")
 
@@ -145,13 +216,15 @@ def process_loads(soup, base_dir):
                     elem.extend(diagram_soup.contents)
                     del elem["data-load"]
                     changed = True
+
                 else:
-                    # For code files, wrap in <pre><code>
+                    # For code files, wrap in appropriate syntax highlighting tags
                     lang = extension_to_lang.get(ext, ext[1:] if ext else "text")
                     code_content = f'<pre><code class="language-{lang}">{html.escape(loaded_content)}</code></pre>'
                     code_soup = BeautifulSoup(code_content, "html.parser")
 
-                    # Propagate data-* attributes from source elem to the <code> element
+                    # Propagate data-* attributes from source element to the code element
+                    # This preserves attributes like data-line-numbers, data-trim, etc.
                     code_elem = code_soup.find("code")
                     if code_elem:
                         for attr_name, attr_value in elem.attrs.items():
@@ -164,18 +237,45 @@ def process_loads(soup, base_dir):
 
                     elem.clear()
                     elem.extend(code_soup.contents)
+
+    # If any changes were made, recursively process again for nested data-load attributes
     if changed:
         process_loads(soup, base_dir)
 
 
 def build_slides(
-    base_path, slides_dir, base_html_path, output_html_path, enable_live_reload=False
-):
-    # Read base.html
+    base_path: str,
+    slides_dir: str,
+    base_html_path: str,
+    output_html_path: str,
+    enable_live_reload: bool = False,
+) -> None:
+    """
+    Build the complete presentation by combining base HTML with all slides.
+
+    This function:
+    1. Reads the base HTML template
+    2. Discovers all slide folders (sorted alphabetically)
+    3. Loads each folder's index.html
+    4. Processes data-load attributes to inline external files
+    5. Adjusts relative paths for resources
+    6. Combines all slides into the base template
+    7. Optionally injects live reload script
+    8. Writes the final presentation to index.html
+
+    Args:
+        base_path: Root directory of the project.
+        slides_dir: Directory containing slide subdirectories.
+        base_html_path: Path to the base HTML template file.
+        output_html_path: Path where the built index.html will be written.
+        enable_live_reload: Whether to inject live reload functionality.
+    """
+    # Read the base HTML template
     with open(base_html_path, "r") as f:
         base_content = f.read()
 
-    # Get subfolders in slides, sorted alphabetically
+    # Get all subdirectories in slides folder, sorted alphabetically
+    # This ensures slides appear in a predictable order
     subfolders = sorted(
         [
             d
@@ -188,10 +288,12 @@ def build_slides(
     for folder in subfolders:
         index_path = os.path.join(slides_dir, folder, "index.html")
         if os.path.exists(index_path):
+            # Load the slide's index.html
             with open(index_path, "r") as f:
                 slide_content = f.read()
 
-            # Replace ./ in src="..." and data-load="..."
+            # Adjust relative paths (./) to be relative to the slides folder
+            # This ensures resources like images and videos load correctly
             slide_content = re.sub(
                 r'src="\./([^"]*)"', rf'src="slides/{folder}/\1"', slide_content
             )
@@ -201,17 +303,17 @@ def build_slides(
                 slide_content,
             )
 
-            # Process data-load attributes recursively
+            # Process data-load attributes recursively to inline external content
             soup = BeautifulSoup(slide_content, "html.parser")
             process_loads(soup, base_path)
             slide_content = str(soup)
 
+            # Accumulate all slide content
             slides_content += slide_content
         else:
             print(f"Warning: index.html not found in {folder}")
 
-    # Insert into .slides div
-    # Find <div class="slides"></div> and replace with <div class="slides">slides_content</div>
+    # Insert all slides into the base template's .slides div
     # Use lambda to avoid issues with backslashes in LaTeX/math equations
     base_content = re.sub(
         r'(<div class="slides">)\s*</div>',
@@ -220,11 +322,11 @@ def build_slides(
         flags=re.DOTALL,
     )
 
-    # Inject live reload script if enabled
+    # Inject live reload script if enabled for development
     if enable_live_reload:
         base_content = inject_live_reload_script(base_content)
 
-    # Write the new index.html
+    # Write the final presentation HTML
     with open(output_html_path, "w") as f:
         f.write(base_content)
 
@@ -232,17 +334,36 @@ def build_slides(
 
 
 def watch_files(
-    base_path,
-    slides_dir,
-    base_html_path,
-    output_html_path,
-    watch,
-    enable_live_reload=False,
-):
+    base_path: str,
+    slides_dir: str,
+    base_html_path: str,
+    output_html_path: str,
+    watch: bool,
+    enable_live_reload: bool = False,
+) -> None:
+    """
+    Watch for file changes and rebuild the presentation automatically.
+
+    This function runs in a separate thread and continuously monitors:
+    - The base HTML template
+    - All slide folder index.html files
+    - The slide folder structure itself
+
+    When changes are detected, it rebuilds the presentation and optionally
+    triggers a browser reload.
+
+    Args:
+        base_path: Root directory of the project.
+        slides_dir: Directory containing slide subdirectories.
+        base_html_path: Path to the base HTML template file.
+        output_html_path: Path where the built index.html will be written.
+        watch: Whether watching is enabled (exits immediately if False).
+        enable_live_reload: Whether to signal browser reload on changes.
+    """
     if not watch:
         return
 
-    # Initial collect files to watch
+    # Initial collection of files to monitor
     files_to_watch = [base_html_path]
     subfolders = sorted(
         [
@@ -256,12 +377,16 @@ def watch_files(
         if os.path.exists(index_path):
             files_to_watch.append(index_path)
 
-    # Get initial mtimes
-    mtimes = {f: os.path.getmtime(f) for f in files_to_watch if os.path.exists(f)}
+    # Record initial modification times for all watched files
+    mtimes: Dict[str, float] = {
+        f: os.path.getmtime(f) for f in files_to_watch if os.path.exists(f)
+    }
 
+    # Main watch loop
     while True:
         time.sleep(1)
-        # Check for new/removed subfolders
+
+        # Check if the slide folder structure has changed (folders added/removed)
         current_subfolders = sorted(
             [
                 d
@@ -272,15 +397,19 @@ def watch_files(
         if current_subfolders != subfolders:
             print("Slides folder structure changed, updating watch list...")
             subfolders = current_subfolders
+
+            # Rebuild the watch list with new folders
             files_to_watch = [base_html_path]
             for folder in subfolders:
                 index_path = os.path.join(slides_dir, folder, "index.html")
                 if os.path.exists(index_path):
                     files_to_watch.append(index_path)
-            # Update mtimes for new files
+
+            # Update modification times for the new file list
             mtimes = {
                 f: os.path.getmtime(f) for f in files_to_watch if os.path.exists(f)
             }
+
             # Rebuild since structure changed
             build_slides(
                 base_path,
@@ -293,11 +422,13 @@ def watch_files(
                 notify_reload()
             continue
 
+        # Check if any watched files have been modified
         changed = False
         for f in files_to_watch:
             if os.path.exists(f) and os.path.getmtime(f) != mtimes.get(f, 0):
                 changed = True
                 mtimes[f] = os.path.getmtime(f)
+
         if changed:
             print("File change detected, rebuilding...")
             build_slides(
@@ -311,10 +442,23 @@ def watch_files(
                 notify_reload()
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Build and serve reveal.js slides.")
+def main() -> None:
+    """
+    Main entry point for the AutoReveal application.
+
+    Parses command-line arguments, builds the initial presentation,
+    optionally starts file watching, and launches an HTTP server to
+    serve the presentation.
+    """
+    parser = argparse.ArgumentParser(
+        description="Build and serve reveal.js presentations with automatic slide "
+        "processing and optional live reload."
+    )
     parser.add_argument(
-        "--port", type=int, default=8085, help="Port to serve on (default: 8085)"
+        "--port",
+        type=int,
+        default=8085,
+        help="Port to serve the presentation on (default: 8085)",
     )
     parser.add_argument(
         "--watch",
@@ -326,19 +470,26 @@ def main():
         action="store_true",
         help="Enable live reload in browser when files change",
     )
+    parser.add_argument(
+        "--slides-dir",
+        type=str,
+        default="slides",
+        help="Directory containing slide folders (default: slides)",
+    )
     args = parser.parse_args()
 
+    # Determine paths based on script location
     base_path = os.path.dirname(os.path.abspath(__file__))
-    slides_dir = os.path.join(base_path, "slides")
+    slides_dir = os.path.join(base_path, args.slides_dir)
     base_html_path = os.path.join(base_path, "base.html")
     output_html_path = os.path.join(base_path, "index.html")
 
-    # Initial build
+    # Perform initial build of the presentation
     build_slides(
         base_path, slides_dir, base_html_path, output_html_path, args.live_reload
     )
 
-    # Start watcher if --watch
+    # Start file watcher thread if --watch flag is enabled
     if args.watch:
         watcher_thread = threading.Thread(
             target=watch_files,
@@ -351,12 +502,14 @@ def main():
                 args.live_reload,
             ),
         )
-        watcher_thread.daemon = True
+        watcher_thread.daemon = True  # Thread will exit when main program exits
         watcher_thread.start()
         print("Watching for file changes...")
 
-    # Serve on the port
+    # Change to base directory to serve files correctly
     os.chdir(base_path)
+
+    # Choose appropriate handler based on live reload setting
     handler = (
         ReloadHTTPRequestHandler
         if args.live_reload
@@ -366,6 +519,7 @@ def main():
     # Allow socket reuse to prevent "Address already in use" errors
     socketserver.TCPServer.allow_reuse_address = True
 
+    # Start the HTTP server
     with socketserver.TCPServer(("", args.port), handler) as httpd:
         print(
             f"Serving on port {args.port}. Open http://localhost:{args.port}/index.html"

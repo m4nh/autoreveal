@@ -1,9 +1,20 @@
 # [AUTO]Reveal.js
 
+<table>
+<tr>
+<td width="40%">
+<img src="dist/images/autorevealjs.jpeg" alt="AutoReveal.js Logo" width="100%" />
+</td>
+<td width="60%">
+
 This is a special python tool to easily create Reveal.js presentations using markdown files
 organized in multiple folders. It automatically generates a single Reveal.js presentation merging
 all chunks found and a lot of more amenities to make your life easier, to make your life better, 
 to make you have a life.
+
+</td>
+</tr>
+</table>
 
 ## Install & Run
 

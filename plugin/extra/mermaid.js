@@ -96,7 +96,6 @@
       // mermaid may have changed the size of the slide by rendering the diagram asynchronously
       setTimeout(() => {
         Reveal.sync();
-        console.log("Reveal synced after mermaid rendering");
       }, 100);
     }
   });
