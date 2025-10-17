@@ -1,2 +1,7 @@
 /index.html
 /logo.png
+
+.DS_Store
+**/.DS_Store
+
+.vscode/
