@@ -285,6 +285,9 @@ def build_slides(
     )
 
     slides_content = ""
+    # Extract the directory name from slides_dir for relative path construction
+    slides_dir_name = os.path.basename(slides_dir)
+
     for folder in subfolders:
         index_path = os.path.join(slides_dir, folder, "index.html")
         if os.path.exists(index_path):
@@ -295,11 +298,13 @@ def build_slides(
             # Adjust relative paths (./) to be relative to the slides folder
             # This ensures resources like images and videos load correctly
             slide_content = re.sub(
-                r'src="\./([^"]*)"', rf'src="slides/{folder}/\1"', slide_content
+                r'src="\./([^"]*)"',
+                rf'src="{slides_dir_name}/{folder}/\1"',
+                slide_content,
             )
             slide_content = re.sub(
                 r'data-load="\./([^"]*)"',
-                rf'data-load="slides/{folder}/\1"',
+                rf'data-load="{slides_dir_name}/{folder}/\1"',
                 slide_content,
             )
 
