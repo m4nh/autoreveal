@@ -11,10 +11,11 @@
 
     <link rel="stylesheet" href="dist/reset.css" />
     <link rel="stylesheet" href="dist/reveal.css" />
-    <link rel="stylesheet" href="dist/theme/blood.css" />
+    <link rel="stylesheet" href="dist/theme/night.css" />
 
     <!-- Theme used for syntax highlighted code -->
-    <link rel="stylesheet" href="plugin/highlight/monokai.css" />
+    <link rel="stylesheet" href="plugin/highlight/atom-dark.css" />
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.12.0/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <style>
       @layer base {
@@ -29,7 +30,9 @@
     </style>
   </head>
   <body>
-    <div class="logo fixed right-2 top-2">LOGO</div>
+    <div class="logo fixed right-4 top-4">
+      <img src="logo.png" class="h-12 w-auto" />
+    </div>
     <div class="reveal">
       <div class="slides"></div>
     </div>
@@ -37,19 +40,37 @@
     <script src="dist/reveal.js"></script>
     <script src="plugin/notes/notes.js"></script>
     <script src="plugin/markdown/markdown.js"></script>
+    <script src="plugin/search/search.js"></script>
     <script src="plugin/highlight/highlight.js"></script>
+    <script src="plugin/math/math.js"></script>
+    <script src="plugin/zoom/zoom.js"></script>
+    <script src="plugin/extra/mermaid.js"></script>
+
     <script>
       // More info about initialization & config:
       // - https://revealjs.com/initialization/
       // - https://revealjs.com/config/
       Reveal.initialize({
         hash: true,
-        width: "100%",
+        width: "90%",
         height: "100%",
         margin: 0.01,
 
+        slideNumber: true,
+
+        // Auto Slide after n milliseconds
+        // autoSlide: 1000,
+
         // Learn about plugins: https://revealjs.com/plugins/
-        plugins: [RevealMarkdown, RevealHighlight, RevealNotes],
+        plugins: [
+          RevealZoom,
+          RevealSearch,
+          RevealMarkdown,
+          RevealHighlight,
+          RevealNotes,
+          RevealMath.KaTeX,
+        ],
+        dependencies: [{ src: "plugin/mermaid/mermaid.js" }],
       });
     </script>
   </body>

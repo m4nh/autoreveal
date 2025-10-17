@@ -32,6 +32,7 @@ extension_to_lang = {
     ".rb": "ruby",
     ".go": "go",
     ".rs": "rust",
+    ".mermaid": "mermaid",
     # Add more as needed
 }
 
@@ -132,6 +133,18 @@ def process_loads(soup, base_dir):
                         elem.extend(loaded_soup.contents)
                     del elem["data-load"]
                     changed = True
+                elif ext == ".mermaid":
+                    # Special handling for mermaid diagrams
+                    # Create structure:
+                    # <span class="diagram-data" style="display: none">CONTENT</span>
+                    # <div class="diagram-display"></div>
+                    diagram_html = f"""<span class="diagram-data" style="display: none">{loaded_content}</span><div class="diagram-display"></div>"""
+                    diagram_soup = BeautifulSoup(diagram_html, "html.parser")
+
+                    elem.clear()
+                    elem.extend(diagram_soup.contents)
+                    del elem["data-load"]
+                    changed = True
                 else:
                     # For code files, wrap in <pre><code>
                     lang = extension_to_lang.get(ext, ext[1:] if ext else "text")
@@ -199,9 +212,10 @@ def build_slides(
 
     # Insert into .slides div
     # Find <div class="slides"></div> and replace with <div class="slides">slides_content</div>
+    # Use lambda to avoid issues with backslashes in LaTeX/math equations
     base_content = re.sub(
         r'(<div class="slides">)\s*</div>',
-        rf"\1\n{slides_content}\n</div>",
+        lambda m: f"{m.group(1)}\n{slides_content}\n</div>",
         base_content,
         flags=re.DOTALL,
     )
@@ -300,7 +314,7 @@ def watch_files(
 def main():
     parser = argparse.ArgumentParser(description="Build and serve reveal.js slides.")
     parser.add_argument(
-        "--port", type=int, default=8000, help="Port to serve on (default: 8000)"
+        "--port", type=int, default=8085, help="Port to serve on (default: 8085)"
     )
     parser.add_argument(
         "--watch",
